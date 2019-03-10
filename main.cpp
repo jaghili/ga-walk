@@ -1,149 +1,231 @@
-#include <iostream>
-#include <algorithm>
-#include <random>
-#include <Eigen/Core>
-#include <SFML/Graphics.hpp>
-#include <SFML/Window.hpp>
+#include<iostream>
+#include<algorithm>
+#include<random>
+#include<Eigen/Core>
+#include<SFML/Graphics.hpp>
+#include<SFML/Window.hpp>
 
-const uint N = 100; // number of line nodes
-const uint N_pop = 15; // number of species
+const uint n_points = 300;
+const uint i_crossover = 299; // must be < n_points !!!
+const uint n_species = 100;
 
-typedef Eigen::Matrix<double, N, 2> Mat;
+typedef Eigen::Matrix<double, n_points, 2> Mat;
+typedef Eigen::Vector2d Point;
 
-// initial position
-const double xi = 10.;
-const double yi = 10.;
-//const Eigen::Vector2f vi(xi,yi);
-// target position
-const double xf = 700.;
-const double yf = 700.;
-//const Eigen::Vector2f vf(xf,yf);
-const double L = std::sqrt(std::pow(xf-xi,2) + std::pow(yf-yi,2));
+// Window size
+const double wsizex = 1000;
+const double wsizey = 800;
 
-const double stepx = L/(N-1);
-const double stepy = L/(N-1);
-//const Eigen::Vector2f step(stepx, stepy);
+// Initial point
+const double xi = 10.0;
+const double yi = 10.0;
 
-const double tol = 0.1;
+// Target point
+const double xf = 400.0;
+const double yf = 600.0;
+const double rf = 10;
+sf::CircleShape target(rf);
 
+// Obstacle
+const double xo = 400.0;
+const double yo = 400.0;
+const double ro = 200.0;
+double fobs(double x, double y) {
+  //return (std::sqrt(std::pow((x - xo),2) + std::pow((y - yo),2)) < ro);
+  return (std::sin(20*x/wsizex)*std::sin(50*y/wsizey)>0.6);
+}
+
+void draw_obstacle(sf::RenderWindow &w) {
+  for (double _x = 0; _x < wsizex; _x += 5) {
+    for (double _y = 0; _y < wsizey; _y += 5) {     
+      if (fobs(_x,_y) > 0.) {
+	sf::CircleShape cercle(2);
+	cercle.setPosition(sf::Vector2f(_x,_y));
+	cercle.setFillColor(sf::Color::White);
+	w.draw(cercle);
+      }
+    }
+  }
+}
+
+
+// steps
+const double L = std::sqrt((xf-xi)*(xf-xi) + (yf-yi)*(yf-yi));
+const double stepx = 1.95*L/n_points;
+const double stepy = 1.95*L/n_points;
+const double tgv = 1e30;
+
+// random generators
 std::random_device rd;
 std::mt19937 gen(rd());
-std::uniform_real_distribution<double> dist_ur(-1.0,1.0);
-std::uniform_int_distribution<> dist_ui(0,N-1);
+std::uniform_real_distribution<double> dist_ur(-1.0,1.0); // real 
+std::uniform_int_distribution<> dist_ui(0,n_points-1); // integers
 
-// specie
-struct steps {
-  Mat p;
+
+struct path {
+  Mat points;
   double fitness = 1e300;
-  
-  //constructor
-  steps() {
-    // create steps
-    p(0,0) = 0.;
-    p(0,1) = 0.;
-    for (int i = 1; i < N; i++) {            
-      p(i,0) = dist_ur(gen) * stepx;
-      p(i,1) = dist_ur(gen) * stepy;
-    }  
+
+  // ctor
+  path () {
+    points(0,0) = xi;
+    points(0,1) = yi;
+    for (uint i = 1; i < n_points; i++) {
+      points(i,0) = dist_ur(gen)*stepx;
+      points(i,1) = dist_ur(gen)*stepy;
+    }    
   }
-  
+
+  // draw the path
+  void plot(sf::RenderWindow & w) {
+    // init point
+    double _x = xi;
+    double _y = yi;
+    
+    for (uint i = 0; i < n_points; i++) {
+      // init
+      double dx  = points(i,0);
+      double dy  = points(i,1);
+      
+      // Draw red line
+      sf::Vertex line[] =
+	{
+	 sf::Vertex(sf::Vector2f(_x, _y), sf::Color::Red),
+	 sf::Vertex(sf::Vector2f(_x + dx, _y + dy), sf::Color::Red)
+	};
+      w.draw(line, 2, sf::Lines);
+
+      /*
+      sf::CircleShape cercle(5);
+      cercle.setPosition(sf::Vector2f(_x,_y));
+      cercle.setFillColor(sf::Color::Blue);
+      w.draw(cercle);
+      */
+      
+      // update
+      _x += dx;
+      _y += dy;
+    }
+  }
 };
 
-// fitness related functions
-void computefit(steps & c) {
-  c.fitness = std::sqrt(std::pow(xf-xi - c.p.col(0).sum(),2) + std::pow(yf- yi-c.p.col(1).sum(),2));
-  //c.fitness = L - std::sqrt(std::pow((xi + c.p.col(0).sum()),2) + std::pow((yi + c.p.col(1).sum()),2));
+void computeFitness(path & c) {
+  double _x = xi;
+  double _y = yi;
+  c.fitness = 0.;
+  for (uint i = 0; i < n_points; i++) {
+    _x += c.points(i,0);
+    _y += c.points(i,1);
+    c.fitness += tgv * fobs(_x,_y);
+  }
+  c.fitness += std::sqrt( (_x-xf)*(_x-xf) + (_y - yf)*(_y - yf) );
 }
-bool orderbyfitness(steps & a, steps & b) { return (a.fitness < b.fitness); }
 
-// mutation operator
-void mutate(std::vector<steps> & pop) {
-  // copy
-  std::vector<steps> parent = pop; // copy
-  // blank
-  for (auto & offspring : pop) { offspring.p = Eigen::MatrixXd::Zero(N,2); }
-  
-  // Fill with offsprings
-  // take the two best from pp
-  pop[0].p = parent[0].p;
-  // mean
-  pop[1].p = 0.5 * parent[0].p + 0.5 * parent[1].p;
 
-  // weighted sum
-  pop[2].p = 0.1 * parent[4].p + 0.9 * parent[1].p;
+void mutate (std::vector<path> & chemins) {
+  // copy 
+  std::vector<path> parents = chemins;
+
+  // reinit
+  for (auto & c : chemins) { c.points = Eigen::MatrixXd::Zero(n_points,2); };
+
+  chemins[0].points = parents[0].points;
+
+  chemins[1].points = 0.5*parents[0].points + 0.5*parents[1].points;
+
+  chemins[2].points = 0.9*parents[1].points + 0.1*parents[2].points;
 
   // crossover between 0 and 1
-  pop[3].p = parent[0].p;
-  pop[3].p.bottomLeftCorner(std::floor((double)N/2),2) = parent[1].p.bottomLeftCorner(std::floor((double)N/2),2);
+  chemins[3].points = parents[0].points;
+  chemins[3].points.bottomLeftCorner(n_points-i_crossover,2) = parents[1].points.bottomLeftCorner(n_points-i_crossover,2);
 
-  // random pointwise mutation
-  pop[4].p = parent[0].p;
-  pop[4].p(dist_ui(gen),0) = dist_ur(gen) * stepx;
-  pop[4].p(dist_ui(gen),1) = dist_ur(gen) * stepy;
+  // crossover between 0 and 2
+  chemins[4].points = parents[0].points;
+  chemins[4].points.bottomLeftCorner(n_points-i_crossover,2) = parents[2].points.bottomLeftCorner(n_points-i_crossover,2);
+
+
+  chemins[5].points = 0.8*parents[0].points + 0.2*parents[2].points;
+
+  chemins[6].points = 0.7*parents[0].points + 0.3*parents[2].points;
+
+  chemins[7].points = 0.6*parents[1].points + 0.4*parents[2].points;
+  
+  for (uint i = 8; i < n_species; i++) {
+    chemins[i].points = parents[0].points;
+    chemins[i].points(dist_ui(gen),0) = dist_ur(gen) * stepx;
+    chemins[i].points(dist_ui(gen),1) = dist_ur(gen) * stepy;
+  }
 }
 
+
+
+
+bool reorder(path & a, path & b) {
+  return (a.fitness < b.fitness);
+}
+
+
+
 int main () {
-  // Init population
-  std::vector<steps> pop;
-  pop.reserve(N_pop);
-  for (int i = 0; i < N_pop; i++) {
-    steps p;
-    pop.push_back(p);
-  }
-
-  // Plot : Render window
-  double global_fit = 1e300;    
-  
-  sf::RenderWindow window(sf::VideoMode(800,800), "SFML Plot");
-  window.setFramerateLimit(30); // FPS limiter
-
-  sf::CircleShape target(20);
+  // Window Init
+  sf::RenderWindow window(sf::VideoMode(wsizex, wsizey), "SFML Plot");
+  //window.setFramerateLimit(60); // FPS limiter
   target.setPosition(sf::Vector2f(xf,yf));
   target.setFillColor(sf::Color::Red);
 
-  uint iter = 0;
-  while (global_fit > tol) {
-    window.clear(sf::Color(0,0,0));
-
-    // draw target
-    window.draw(target);
-    
-    global_fit = 1e300;
-    for (auto & s : pop) {
-      // compute fitness scores
-      computefit(s);
-      global_fit = std::min(global_fit,s.fitness);
-
-      // draw
-      double _x = xi;
-      double _y = yi;
-      for (int i = 0; i < N; i++) {
-	sf::Vertex line[] = {
-	  sf::Vertex(sf::Vector2f( _x, _y), sf::Color::Red),
-	  sf::Vertex(sf::Vector2f( _x + s.p(i,0), _y + s.p(i,1)), sf::Color::Red)
-	};
-	window.draw(line, 2, sf::Lines);
-	_x = _x + s.p(i,0);
-	_y = _y + s.p(i,1);
-      }
-    }
-    window.display();
-
-    // mutation
-    if (global_fit > tol) {
-      for (int i = 0; i < N_pop; i++) {	std::cout << "fit" << i << "=" << pop[i].fitness << " "; }
-      std::cout << "\t global fit=" << global_fit << " -> mutating..." << std::endl;
-      
-      std::sort(pop.begin(), pop.end(), orderbyfitness); // reorder
-      mutate(pop); // mutate
-      iter++;
-    }
-    else {
-      std::cout << "ACHIEVED! iters=" << iter<< " global_fit=" << global_fit << std::endl;
-    }
+  double gfit = 1e300;
+  uint n_gen = 0;
+  
+  // init chemins
+  std::cout << "init paths..." << std::endl;
+  std::vector<path> chemins;
+  chemins.reserve(n_species);
+  for (uint i = 0; i < n_species; i++) {
+    path c;
+    computeFitness(c);
+    gfit = std::min(c.fitness, gfit);
+    chemins.push_back(c);
   }
-  // exit
-  window.close();
 
+
+  // Loop 
+  while (gfit > rf) {
+    n_gen++;
+
+    // reorder
+    std::sort(chemins.begin(), chemins.end(), reorder);
+
+    // plot
+    window.clear(sf::Color(0,0,0));
+    draw_obstacle(window);
+    window.draw(target);
+    chemins[0].plot(window);
+    window.display();    
+
+    // mutate
+    mutate(chemins);
+
+    // recompute fitness
+    gfit = 1e300;
+    for (auto & c : chemins) {
+      computeFitness(c);
+      gfit = std::min(c.fitness, gfit);
+    }
+    std::cout << n_gen << "\t" << gfit << std::endl;
+  }
+
+  // converged, plotting
+  std::sort(chemins.begin(), chemins.end(), reorder);
+  path & cbest = chemins[0];
+  std::cout << "Converged in " << n_gen << " iters! fit=" << cbest.fitness <<  " plotting..." << std::endl;
+  
+  while (true) {
+    window.clear(sf::Color(0,0,0));
+    draw_obstacle(window);
+    window.draw(target);
+    cbest.plot(window);
+    window.display();    
+  }
+  
   return 0;
 }

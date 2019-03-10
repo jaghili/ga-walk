@@ -7,7 +7,7 @@
 
 const uint n_points = 300;
 const uint i_crossover = 299; // must be < n_points !!!
-const uint n_species = 100;
+const uint n_species = 50;
 
 typedef Eigen::Matrix<double, n_points, 2> Mat;
 typedef Eigen::Vector2d Point;
@@ -32,7 +32,7 @@ const double yo = 400.0;
 const double ro = 200.0;
 double fobs(double x, double y) {
   //return (std::sqrt(std::pow((x - xo),2) + std::pow((y - yo),2)) < ro);
-  return (std::sin(20*x/wsizex)*std::sin(50*y/wsizey)>0.6);
+  return (std::sin(50*x/wsizex)*std::sin(50*y/wsizey)>0.7);
 }
 
 void draw_obstacle(sf::RenderWindow &w) {
@@ -51,8 +51,8 @@ void draw_obstacle(sf::RenderWindow &w) {
 
 // steps
 const double L = std::sqrt((xf-xi)*(xf-xi) + (yf-yi)*(yf-yi));
-const double stepx = 1.95*L/n_points;
-const double stepy = 1.95*L/n_points;
+const double stepx = 1.5*L/n_points;
+const double stepy = 1.5*L/n_points;
 const double tgv = 1e30;
 
 // random generators
@@ -116,7 +116,7 @@ void computeFitness(path & c) {
   for (uint i = 0; i < n_points; i++) {
     _x += c.points(i,0);
     _y += c.points(i,1);
-    c.fitness += tgv * fobs(_x,_y);
+    c.fitness += tgv * fobs(_x,_y); // penalize in case of crossing an obstacle
   }
   c.fitness += std::sqrt( (_x-xf)*(_x-xf) + (_y - yf)*(_y - yf) );
 }
@@ -131,29 +131,33 @@ void mutate (std::vector<path> & chemins) {
 
   chemins[0].points = parents[0].points;
 
-  chemins[1].points = 0.5*parents[0].points + 0.5*parents[1].points;
+  chemins[1].points = 0.9*parents[0].points + 0.1*parents[1].points;
 
-  chemins[2].points = 0.9*parents[1].points + 0.1*parents[2].points;
+  chemins[2].points = 0.5*parents[1].points + 0.5*parents[2].points;
 
   // crossover between 0 and 1
   chemins[3].points = parents[0].points;
   chemins[3].points.bottomLeftCorner(n_points-i_crossover,2) = parents[1].points.bottomLeftCorner(n_points-i_crossover,2);
 
   // crossover between 0 and 2
+  uint r_cross = dist_ui(gen);
   chemins[4].points = parents[0].points;
-  chemins[4].points.bottomLeftCorner(n_points-i_crossover,2) = parents[2].points.bottomLeftCorner(n_points-i_crossover,2);
+  chemins[4].points.bottomLeftCorner(n_points-r_cross,2) = parents[2].points.bottomLeftCorner(n_points-r_cross,2);
 
 
-  chemins[5].points = 0.8*parents[0].points + 0.2*parents[2].points;
+  chemins[5].points = 0.7*parents[0].points + 0.3*parents[2].points;
 
-  chemins[6].points = 0.7*parents[0].points + 0.3*parents[2].points;
+  chemins[6].points = 0.6*parents[1].points + 0.4*parents[2].points;
 
-  chemins[7].points = 0.6*parents[1].points + 0.4*parents[2].points;
+  chemins[7].points = parents[0].points;
+  chemins[7].points(n_points-1,0) = dist_ur(gen) * stepx;
+  chemins[7].points(n_points-1,1) = dist_ur(gen) * stepy;
   
   for (uint i = 8; i < n_species; i++) {
     chemins[i].points = parents[0].points;
-    chemins[i].points(dist_ui(gen),0) = dist_ur(gen) * stepx;
-    chemins[i].points(dist_ui(gen),1) = dist_ur(gen) * stepy;
+    uint mut_point = dist_ui(gen);    
+    chemins[i].points(mut_point,0) = dist_ur(gen) * stepx;
+    chemins[i].points(mut_point,1) = dist_ur(gen) * stepy;
   }
 }
 
@@ -199,7 +203,8 @@ int main () {
     window.clear(sf::Color(0,0,0));
     draw_obstacle(window);
     window.draw(target);
-    chemins[0].plot(window);
+    chemins[0].plot(window); // plot only the best 
+    //for (auto & c : chemins) { c.plot(window); } // plot everybody
     window.display();    
 
     // mutate
